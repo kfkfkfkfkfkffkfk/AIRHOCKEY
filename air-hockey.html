@@ -1,0 +1,273 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Air Hockey</title>
+
+<style>
+    body {
+        background: #111;
+        color: white;
+        font-family: Arial, sans-serif;
+        text-align: center;
+    }
+
+    canvas {
+        background: #0a5;
+        border: 6px solid white;
+        display: block;
+        margin: auto;
+    }
+
+    .buttons {
+        margin-top: 10px;
+    }
+
+    button {
+        font-size: 16px;
+        padding: 8px 14px;
+        margin: 0 6px;
+        cursor: pointer;
+    }
+</style>
+</head>
+<body>
+
+<h2>Air Hockey</h2>
+
+<canvas id="game" width="800" height="400"></canvas>
+
+<div class="buttons">
+    <button onclick="setDifficulty('easy')">Easy</button>
+    <button onclick="setDifficulty('medium')">Medium</button>
+    <button onclick="setDifficulty('hard')">Hard</button>
+    <button onclick="resetScores()">Reset Scores</button>
+</div>
+
+<script>
+const canvas = document.getElementById("game");
+const ctx = canvas.getContext("2d");
+
+/* =====================
+   AI DIFFICULTY
+   ===================== */
+const AI = {
+    easy:   { reaction: 0.04, error: 35 },
+    medium: { reaction: 0.08, error: 18 },
+    hard:   { reaction: 0.12, error: 6 }
+};
+let currentAI = AI.medium;
+
+function setDifficulty(level) {
+    currentAI = AI[level];
+}
+
+/* =====================
+   GAME OBJECTS
+   ===================== */
+const puck = { x: 400, y: 200, r: 10, vx: 0, vy: 0 };
+const player = { x: 150, y: 200, r: 22, vx: 0, vy: 0 };
+const ai = { x: 650, y: 200, r: 22, vx: 0, vy: 0 };
+
+let playerScore = 0;
+let aiScore = 0;
+
+/* =====================
+   GOALS
+   ===================== */
+const goalWidth = 10;
+const goalHeight = 120;
+const goalTop = (canvas.height - goalHeight) / 2;
+
+/* =====================
+   INPUT WITH RESISTANCE
+   ===================== */
+canvas.addEventListener("mousemove", e => {
+    const rect = canvas.getBoundingClientRect();
+    const mx = e.clientX - rect.left;
+    const my = e.clientY - rect.top;
+
+    const maxReach = canvas.width / 2 - player.r;
+    const reachRatio = player.x / maxReach;
+    const resistance = Math.max(0.25, 1 - Math.pow(reachRatio, 1.5));
+
+    const targetX = Math.min(maxReach, Math.max(player.r, mx));
+    const targetY = Math.min(canvas.height - player.r, Math.max(player.r, my));
+
+    player.vx = (targetX - player.x) * resistance;
+    player.vy = (targetY - player.y) * resistance;
+
+    player.x += player.vx;
+    player.y += player.vy;
+});
+
+/* =====================
+   DRAW UTILITY
+   ===================== */
+function drawCircle(x, y, r, color) {
+    ctx.fillStyle = color;
+    ctx.beginPath();
+    ctx.arc(x, y, r, 0, Math.PI * 2);
+    ctx.fill();
+}
+
+/* =====================
+   RESET PUCK RANDOMLY
+   ===================== */
+function resetPuckRandom() {
+    puck.x = canvas.width / 2;
+    puck.y = canvas.height / 2;
+    const direction = Math.random() < 0.5 ? -1 : 1;
+    puck.vx = direction * 4;
+    puck.vy = (Math.random() * 4) - 2;
+}
+
+/* =====================
+   RESET SCORES
+   ===================== */
+function resetScores() {
+    playerScore = 0;
+    aiScore = 0;
+}
+
+/* =====================
+   SAFE ROUND COLLISION WITH VELOCITY BOOST
+   ===================== */
+function paddleHit(paddle) {
+    const dx = puck.x - paddle.x;
+    const dy = puck.y - paddle.y;
+    const dist = Math.hypot(dx, dy);
+    const minDist = puck.r + paddle.r;
+
+    if (dist < minDist) {
+        const safeDist = dist === 0 ? 0.01 : dist;
+        const nx = dx / safeDist;
+        const ny = dy / safeDist;
+
+        const currentSpeed = Math.hypot(puck.vx, puck.vy);
+        let newVx = nx * currentSpeed + paddle.vx * 0.35;
+        let newVy = ny * currentSpeed + paddle.vy * 0.35;
+
+        // Keep higher speed to prevent slow bounces
+        const newSpeed = Math.hypot(newVx, newVy);
+        if (newSpeed < currentSpeed) {
+            const scale = currentSpeed / newSpeed;
+            newVx *= scale;
+            newVy *= scale;
+        }
+
+        puck.vx = newVx;
+        puck.vy = newVy;
+
+        // Push puck outside paddle
+        puck.x = paddle.x + nx * minDist;
+        puck.y = paddle.y + ny * minDist;
+    }
+}
+
+/* =====================
+   GAME LOOP
+   ===================== */
+function update() {
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+    /* Center line */
+    ctx.strokeStyle = "white";
+    ctx.beginPath();
+    ctx.moveTo(canvas.width / 2, 0);
+    ctx.lineTo(canvas.width / 2, canvas.height);
+    ctx.stroke();
+
+    /* Goals */
+    ctx.fillStyle = "black";
+    ctx.fillRect(0, goalTop, goalWidth, goalHeight);
+    ctx.fillRect(canvas.width - goalWidth, goalTop, goalWidth, goalHeight);
+
+    /* Move puck */
+    puck.x += puck.vx;
+    puck.y += puck.vy;
+
+    /* Apply friction */
+    const friction = 0.995;
+    const speed = Math.hypot(puck.vx, puck.vy);
+    if (speed > 0) {
+        puck.vx *= friction;
+        puck.vy *= friction;
+    }
+
+    /* Solid wall collisions (prevent going through walls) */
+    // Top
+    if (puck.y - puck.r < 0) {
+        puck.y = puck.r;
+        puck.vy *= -1;
+    }
+    // Bottom
+    if (puck.y + puck.r > canvas.height) {
+        puck.y = canvas.height - puck.r;
+        puck.vy *= -1;
+    }
+
+    // Left wall (if not goal)
+    if (puck.x - puck.r < goalWidth || puck.x - puck.r < 0) {
+        if (puck.y < goalTop || puck.y > goalTop + goalHeight) {
+            puck.x = puck.r + goalWidth;
+            puck.vx *= -1;
+        }
+    }
+
+    // Right wall (if not goal)
+    if (puck.x + puck.r > canvas.width - goalWidth || puck.x + puck.r > canvas.width) {
+        if (puck.y < goalTop || puck.y > goalTop + goalHeight) {
+            puck.x = canvas.width - puck.r - goalWidth;
+            puck.vx *= -1;
+        }
+    }
+
+    /* Goal detection */
+    if (puck.x - puck.r <= 0 && puck.y > goalTop && puck.y < goalTop + goalHeight) {
+        aiScore++;
+        resetPuckRandom();
+    }
+    if (puck.x + puck.r >= canvas.width && puck.y > goalTop && puck.y < goalTop + goalHeight) {
+        playerScore++;
+        resetPuckRandom();
+    }
+
+    /* Paddle collisions */
+    paddleHit(player);
+    paddleHit(ai);
+
+    /* AI movement */
+    let targetY = canvas.height / 2;
+    if (puck.vx > 0) {
+        const t = (ai.x - puck.x) / puck.vx;
+        targetY = puck.y + puck.vy * t;
+        targetY += Math.random() * currentAI.error - currentAI.error / 2;
+    }
+
+    ai.vy = (targetY - ai.y) * currentAI.reaction;
+    ai.y += ai.vy;
+    ai.y = Math.max(ai.r, Math.min(canvas.height - ai.r, ai.y));
+
+    /* Draw */
+    drawCircle(puck.x, puck.y, puck.r, "black");
+    drawCircle(player.x, player.y, player.r, "blue");
+    drawCircle(ai.x, ai.y, ai.r, "red");
+
+    ctx.fillStyle = "white";
+    ctx.font = "24px Arial";
+    ctx.fillText(playerScore, 360, 30);
+    ctx.fillText(aiScore, 420, 30);
+
+    requestAnimationFrame(update);
+}
+
+/* =====================
+   START GAME
+   ===================== */
+resetPuckRandom();
+update();
+</script>
+
+</body>
+</html>
